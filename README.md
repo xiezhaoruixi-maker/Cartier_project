@@ -167,23 +167,16 @@ Build and run the project:
 ```bash
 docker compose up --build
 
-Enter the container:
-docker exec -it cartier_project bash
+Enter the container:  docker exec -it cartier_project bash
 
-Example dependency check:
-python -c "import pandas, requests, sklearn"
+Example dependency check:  python -c "import pandas, requests, sklearn"
 
 The central dataset produced in this project is:  collection_summary.csv
+
 This dataset aggregates:
-
 product counts by collection
-
 average price
-
 median price
-
 collection share
-
 yearly comparison
-
 It serves as the foundation for collection-level product structure analysis.
