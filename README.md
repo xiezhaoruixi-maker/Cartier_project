@@ -162,6 +162,14 @@ Delivered an interactive Tableau dashboard with filtering, sorting, and drill-do
 
 The data preparation pipeline is containerized using Docker to ensure consistent execution across environments.
 
+This dataset aggregates:
+product counts by collection
+average price
+median price
+collection share
+yearly comparison
+It serves as the foundation for collection-level product structure analysis.
+
 ### Build and run the project
 ```bash
 docker compose up --build
@@ -173,10 +181,4 @@ docker compose up --build
 
 ### The central dataset produced in this project is:  collection_summary.csv
 
-This dataset aggregates:
-product counts by collection
-average price
-median price
-collection share
-yearly comparison
-It serves as the foundation for collection-level product structure analysis.
+
