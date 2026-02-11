@@ -1,123 +1,162 @@
 import re
+import argparse
 from pathlib import Path
 import pandas as pd
 
+# =========================
+# Paths
+# =========================
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
 OUT_DIR = ROOT / "data" / "processed"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+DEFAULT_INPUT = RAW_DIR / "baseline_2022_fe.csv"
+DEFAULT_OUTPUT = OUT_DIR / "baseline_2022_labeled.csv"
+
+# =========================
+# Regex patterns (teacher rules)
+# =========================
+# Material:
+# - If contains Pink/Yellow/Rose/White Gold OR Gold -> Gold
+# - If NOT contain Gold AND contains Steel -> Steel
+# - Else -> Other
 GOLD_PAT = re.compile(r"\b(pink gold|rose gold|yellow gold|white gold|gold)\b", re.I)
 STEEL_PAT = re.compile(r"\bsteel\b", re.I)
 
+# Size:
+# - Small/Mini/SM -> Small
+# - Large/XL -> Large
+# - Else -> Medium (needed for the Size Matrix insight)
 SMALL_PAT = re.compile(r"\b(small|mini|sm)\b", re.I)
 LARGE_PAT = re.compile(r"\b(large|xl)\b", re.I)
 
+# =========================
+# Helpers
+# =========================
+TEXT_COL_CANDIDATES = [
+    "Description", "description",
+    "Title", "title",
+    "Name", "name",
+    "ProductName", "product_name",
+    "url", "URL", "link", "Link"
+]
+
 def normalize_text(x) -> str:
-    if x is None or (isinstance(x, float) and pd.isna(x)):
+    if x is None:
+        return ""
+    # Handle NaN
+    if isinstance(x, float) and pd.isna(x):
+        return ""
+    if pd.isna(x):
         return ""
     return str(x).strip()
 
+def pick_text_column(df: pd.DataFrame) -> str:
+    # Prefer richer text first (description/title/name), then fall back to url
+    for c in TEXT_COL_CANDIDATES:
+        if c in df.columns:
+            return c
+    raise ValueError(
+        "No usable text column found. "
+        f"Looked for: {TEXT_COL_CANDIDATES}. "
+        f"Available columns: {list(df.columns)}"
+    )
+
 def extract_material(text: str) -> str:
-    t = normalize_text(text).lower()
+    t = normalize_text(text)
     if not t:
-        return "Unknown"
+        return "Other"
     if GOLD_PAT.search(t):
         return "Gold"
-    # teacher rule: "if not contain Gold and contain Steel -> Steel"
     if STEEL_PAT.search(t) and not GOLD_PAT.search(t):
         return "Steel"
     return "Other"
 
 def extract_size(text: str) -> str:
-    t = normalize_text(text).lower()
+    t = normalize_text(text)
     if not t:
-        return "Unknown"
+        return "Medium"
     if SMALL_PAT.search(t):
         return "Small"
     if LARGE_PAT.search(t):
         return "Large"
     return "Medium"
 
-def build_features(df: pd.DataFrame) -> pd.DataFrame:
+def ensure_reference_code(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Expect df contains at least one of: description, title, url
-    We create a 'text_for_features' by concatenating available fields.
+    Optional: if reference_code missing but url contains 'CRWT100015' patterns,
+    try to parse it. If reference_code exists, do nothing.
     """
-    for col in ["description", "title", "url"]:
-        if col not in df.columns:
-            df[col] = ""
+    if "reference_code" in df.columns:
+        return df
 
-    df["text_for_features"] = (
-        df["description"].astype(str).fillna("") + " " +
-        df["title"].astype(str).fillna("") + " " +
-        df["url"].astype(str).fillna("")
-    ).str.strip()
+    if "Reference Code" in df.columns:
+        df = df.rename(columns={"Reference Code": "reference_code"})
+        return df
 
-    df["material"] = df["text_for_features"].apply(extract_material)
-    df["size"] = df["text_for_features"].apply(extract_size)
+    # Try parse from url
+    url_col = None
+    for c in ["url", "URL", "link", "Link"]:
+        if c in df.columns:
+            url_col = c
+            break
+
+    if url_col is None:
+        return df
+
+    # Typical Cartier ref patterns: CRWT100015, WSTA..., etc.
+    # We’ll capture sequences of letters+digits >= 6
+    pat = re.compile(r"\b([A-Z]{2,6}\d{4,10})\b")
+    df["reference_code"] = df[url_col].astype(str).str.extract(pat, expand=False)
     return df
 
-def summarize(df: pd.DataFrame, year: int) -> pd.DataFrame:
-    """
-    Create a summary table for Power BI:
-    - material share
-    - size share
-    """
-    total = len(df)
-    mat = df["material"].value_counts(dropna=False).rename_axis("material").reset_index(name="n")
-    mat["share"] = mat["n"] / total
-    mat["year"] = year
-    mat["metric"] = "material"
-
-    siz = df["size"].value_counts(dropna=False).rename_axis("size").reset_index(name="n")
-    siz["share"] = siz["n"] / total
-    siz["year"] = year
-    siz["metric"] = "size"
-    siz = siz.rename(columns={"size": "label"})
-
-    mat = mat.rename(columns={"material": "label"})
-    return pd.concat([mat, siz], ignore_index=True)
-
-def load_csv_safely(path: Path) -> pd.DataFrame:
-    if not path.exists():
+def main(input_path: Path, output_path: Path) -> None:
+    if not input_path.exists():
         raise FileNotFoundError(
-            f"Missing file: {path}\n"
-            f"Put your raw CSV into: {RAW_DIR}\n"
-            f"Expected names: baseline_2022.csv and current_2026_raw.csv"
+            f"Input file not found: {input_path}\n"
+            f"Put your baseline CSV into: {RAW_DIR}\n"
+            f"Recommended name: baseline_2022_fe.csv"
         )
-    return pd.read_csv(path)
 
-def main():
-    # Expected input file names (from team B and C)
-    path_2022 = RAW_DIR / "baseline_2022.csv"
-    path_2026 = RAW_DIR / "current_2026_raw.csv"
+    df = pd.read_csv(input_path)
+    df = ensure_reference_code(df)
 
-    df_2022 = load_csv_safely(path_2022)
-    df_2026 = load_csv_safely(path_2026)
+    text_col = pick_text_column(df)
 
-    df_2022["year"] = 2022
-    df_2026["year"] = 2026
+    # Create labels
+    df["material_label"] = df[text_col].apply(extract_material)
+    df["size_label"] = df[text_col].apply(extract_size)
 
-    df_2022_feat = build_features(df_2022.copy())
-    df_2026_feat = build_features(df_2026.copy())
+    # Output labeled file
+    df.to_csv(output_path, index=False)
 
-    out_2022 = OUT_DIR / "catalogue_features_2022.csv"
-    out_2026 = OUT_DIR / "catalogue_features_2026.csv"
-    df_2022_feat.to_csv(out_2022, index=False)
-    df_2026_feat.to_csv(out_2026, index=False)
+    # Summaries for Power BI
+    mat_summary = df.groupby("material_label").size().reset_index(name="n")
+    mat_summary["share"] = mat_summary["n"] / mat_summary["n"].sum()
+    mat_summary = mat_summary.sort_values("n", ascending=False)
+    mat_summary.to_csv(OUT_DIR / "material_summary_2022.csv", index=False)
 
-    sum_2022 = summarize(df_2022_feat, 2022)
-    sum_2026 = summarize(df_2026_feat, 2026)
-    summary = pd.concat([sum_2022, sum_2026], ignore_index=True)
+    size_summary = df.groupby("size_label").size().reset_index(name="n")
+    size_summary["share"] = size_summary["n"] / size_summary["n"].sum()
+    size_summary = size_summary.sort_values("n", ascending=False)
+    size_summary.to_csv(OUT_DIR / "size_summary_2022.csv", index=False)
 
-    out_summary = OUT_DIR / "catalogue_summary_2022_vs_2026.csv"
-    summary.to_csv(out_summary, index=False)
-
-    print("Done.")
-    print(f"- {out_2022}")
-    print(f"- {out_2026}")
-    print(f"- {out_summary}")
+    # Print quick checks
+    print("✅ Done.")
+    print(f"Input:  {input_path}")
+    print(f"Output: {output_path}")
+    print(f"Text column used: {text_col}")
+    print("\nMaterial distribution:")
+    print(mat_summary.to_string(index=False))
+    print("\nSize distribution:")
+    print(size_summary.to_string(index=False))
+    print(f"\nSaved summaries to:\n- {OUT_DIR / 'material_summary_2022.csv'}\n- {OUT_DIR / 'size_summary_2022.csv'}")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Cartier catalogue feature engineering (material & size labels).")
+    parser.add_argument("--input", type=str, default=str(DEFAULT_INPUT), help="Path to input baseline CSV (default: data/raw/baseline_2022_fe.csv)")
+    parser.add_argument("--output", type=str, default=str(DEFAULT_OUTPUT), help="Path to output labeled CSV (default: data/processed/baseline_2022_labeled.csv)")
+    args = parser.parse_args()
+
+    main(Path(args.input), Path(args.output))
