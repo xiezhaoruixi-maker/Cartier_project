@@ -167,11 +167,11 @@ The data preparation pipeline is containerized using Docker to ensure consistent
 docker compose up --build
 
 
-Enter the container:  docker exec -it cartier_project bash
+### Enter the container:  docker exec -it cartier_project bash
 
-Example dependency check:  python -c "import pandas, requests, sklearn"
+### Example dependency check:  python -c "import pandas, requests, sklearn"
 
-The central dataset produced in this project is:  collection_summary.csv
+### The central dataset produced in this project is:  collection_summary.csv
 
 This dataset aggregates:
 product counts by collection
