@@ -162,10 +162,10 @@ Delivered an interactive Tableau dashboard with filtering, sorting, and drill-do
 
 The data preparation pipeline is containerized using Docker to ensure consistent execution across environments.
 
-Build and run the project:
-
+### Build and run the project
 ```bash
 docker compose up --build
+
 
 Enter the container:  docker exec -it cartier_project bash
 
