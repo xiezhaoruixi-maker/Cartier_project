@@ -3,4 +3,6 @@ numpy
 openpyxl
 requests
 beautifulsoup4
+lxml
+tqdm
 scikit-learn
