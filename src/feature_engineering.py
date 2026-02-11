@@ -1,162 +1,157 @@
+# feature_engineering_2026.py
+# -*- coding: utf-8 -*-
+
 import re
-import argparse
-from pathlib import Path
+import os
+from datetime import datetime
+
 import pandas as pd
 
-# =========================
-# Paths
-# =========================
-ROOT = Path(__file__).resolve().parents[1]
-RAW_DIR = ROOT / "data" / "raw"
-OUT_DIR = ROOT / "data" / "processed"
-OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_INPUT = RAW_DIR / "baseline_2022_fe.csv"
-DEFAULT_OUTPUT = OUT_DIR / "baseline_2022_labeled.csv"
+# ========= 0) 路径配置（按你项目结构来） =========
+RAW_2026_PATH = r"data/raw/current_2026_raw_20260211_140133.csv"  # 改成你真实文件名
+OUT_DIR = r"data/raw"  # 先存 raw 目录也可以；你也可以换成 data/processed
 
-# =========================
-# Regex patterns (teacher rules)
-# =========================
-# Material:
-# - If contains Pink/Yellow/Rose/White Gold OR Gold -> Gold
-# - If NOT contain Gold AND contains Steel -> Steel
-# - Else -> Other
-GOLD_PAT = re.compile(r"\b(pink gold|rose gold|yellow gold|white gold|gold)\b", re.I)
-STEEL_PAT = re.compile(r"\bsteel\b", re.I)
 
-# Size:
-# - Small/Mini/SM -> Small
-# - Large/XL -> Large
-# - Else -> Medium (needed for the Size Matrix insight)
-SMALL_PAT = re.compile(r"\b(small|mini|sm)\b", re.I)
-LARGE_PAT = re.compile(r"\b(large|xl)\b", re.I)
+# ========= 1) 工具函数 =========
+def ensure_dir(path: str) -> None:
+    os.makedirs(path, exist_ok=True)
 
-# =========================
-# Helpers
-# =========================
-TEXT_COL_CANDIDATES = [
-    "Description", "description",
-    "Title", "title",
-    "Name", "name",
-    "ProductName", "product_name",
-    "url", "URL", "link", "Link"
-]
 
-def normalize_text(x) -> str:
-    if x is None:
-        return ""
-    # Handle NaN
-    if isinstance(x, float) and pd.isna(x):
-        return ""
+def parse_eur_price_to_float(x) -> float:
+    """
+    输入示例：
+      "5,000€" / "5 000€" / "5000 €" / 5000.0 / None
+    输出：
+      5000.0 或 NaN
+    """
     if pd.isna(x):
+        return float("nan")
+    if isinstance(x, (int, float)):
+        return float(x)
+
+    s = str(x).strip()
+    if s == "":
+        return float("nan")
+
+    # 去掉货币符号、空格、NBSP等
+    s = s.replace("€", "").replace("\u00a0", " ").strip()
+
+    # 常见格式：5,000 / 5 000 / 5.000
+    # 这里优先把空格删掉，再把逗号/点当作千分位处理（针对欧元页面常见写法）
+    s = s.replace(" ", "")
+    # 如果同时出现逗号和点：保守处理，先移除千分位分隔符
+    # 简化：把所有逗号都删掉，把所有点都删掉（因为你这里基本都是整数欧元）
+    s = s.replace(",", "").replace(".", "")
+
+    # 只保留数字
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return float("nan")
+    return float(m.group(1))
+
+
+def normalize_cartier_url(u: str, country_path="/fr-fr") -> str:
+    """
+    你的 newPdpLink/pdpLink 是相对路径时，补全为 https://www.cartier.com/fr-fr/...
+    """
+    if pd.isna(u):
         return ""
-    return str(x).strip()
+    s = str(u).strip()
+    if s == "":
+        return ""
+    if s.startswith("http://") or s.startswith("https://"):
+        return s
+    # 统一以 /fr-fr 开头
+    if not s.startswith(country_path):
+        if s.startswith("/"):
+            s = country_path + s
+        else:
+            s = country_path + "/" + s
+    return "https://www.cartier.com" + s
 
-def pick_text_column(df: pd.DataFrame) -> str:
-    # Prefer richer text first (description/title/name), then fall back to url
-    for c in TEXT_COL_CANDIDATES:
-        if c in df.columns:
-            return c
-    raise ValueError(
-        "No usable text column found. "
-        f"Looked for: {TEXT_COL_CANDIDATES}. "
-        f"Available columns: {list(df.columns)}"
-    )
 
-def extract_material(text: str) -> str:
-    t = normalize_text(text)
-    if not t:
-        return "Other"
-    if GOLD_PAT.search(t):
-        return "Gold"
-    if STEEL_PAT.search(t) and not GOLD_PAT.search(t):
-        return "Steel"
-    return "Other"
-
-def extract_size(text: str) -> str:
-    t = normalize_text(text)
-    if not t:
-        return "Medium"
-    if SMALL_PAT.search(t):
-        return "Small"
-    if LARGE_PAT.search(t):
-        return "Large"
-    return "Medium"
-
-def ensure_reference_code(df: pd.DataFrame) -> pd.DataFrame:
+def safe_write_csv(df: pd.DataFrame, out_dir: str, base_name: str) -> str:
     """
-    Optional: if reference_code missing but url contains 'CRWT100015' patterns,
-    try to parse it. If reference_code exists, do nothing.
+    避免 PermissionError（文件正被 VSCode 打开时很常见）：
+    永远写一个带时间戳的新文件名。
     """
-    if "reference_code" in df.columns:
-        return df
+    ensure_dir(out_dir)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(out_dir, f"{base_name}_{ts}.csv")
+    df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    return out_path
 
-    if "Reference Code" in df.columns:
-        df = df.rename(columns={"Reference Code": "reference_code"})
-        return df
 
-    # Try parse from url
-    url_col = None
-    for c in ["url", "URL", "link", "Link"]:
-        if c in df.columns:
-            url_col = c
-            break
+# ========= 2) 主流程 =========
+def build_baseline_2026_fe(raw_path: str) -> pd.DataFrame:
+    df = pd.read_csv(raw_path)
 
-    if url_col is None:
-        return df
+    # 基础检查
+    expected = {"reference_code", "local_reference", "title", "price", "currency", "url", "collection", "objectID"}
+    missing = expected - set(df.columns)
+    if missing:
+        raise ValueError(f"RAW_2026 缺列: {missing} | 现有列: {df.columns.tolist()}")
 
-    # Typical Cartier ref patterns: CRWT100015, WSTA..., etc.
-    # We’ll capture sequences of letters+digits >= 6
-    pat = re.compile(r"\b([A-Z]{2,6}\d{4,10})\b")
-    df["reference_code"] = df[url_col].astype(str).str.extract(pat, expand=False)
-    return df
+    # 规范列名（如果你想严格一致）
+    df = df.copy()
+    df["year"] = 2026
 
-def main(input_path: Path, output_path: Path) -> None:
-    if not input_path.exists():
-        raise FileNotFoundError(
-            f"Input file not found: {input_path}\n"
-            f"Put your baseline CSV into: {RAW_DIR}\n"
-            f"Recommended name: baseline_2022_fe.csv"
-        )
+    # 价格数值化（欧元）
+    df["price_eur"] = df["price"].apply(parse_eur_price_to_float)
 
-    df = pd.read_csv(input_path)
-    df = ensure_reference_code(df)
+    # currency 标准化
+    df["currency"] = df["currency"].astype(str).str.strip().str.upper()
 
-    text_col = pick_text_column(df)
+    # URL 补全（你抓到的是 /fr-fr/product/CR... 这种）
+    df["url_full"] = df["url"].apply(lambda x: normalize_cartier_url(x, country_path="/fr-fr"))
 
-    # Create labels
-    df["material_label"] = df[text_col].apply(extract_material)
-    df["size_label"] = df[text_col].apply(extract_size)
+    # collection/title 清洗（去掉多余空白）
+    df["collection"] = df["collection"].fillna("").astype(str).str.strip()
+    df["title"] = df["title"].fillna("").astype(str).str.strip()
 
-    # Output labeled file
-    df.to_csv(output_path, index=False)
+    # 参考码清洗（保证大写无空格）
+    for c in ["reference_code", "local_reference", "objectID"]:
+        df[c] = df[c].fillna("").astype(str).str.strip().str.upper()
 
-    # Summaries for Power BI
-    mat_summary = df.groupby("material_label").size().reset_index(name="n")
-    mat_summary["share"] = mat_summary["n"] / mat_summary["n"].sum()
-    mat_summary = mat_summary.sort_values("n", ascending=False)
-    mat_summary.to_csv(OUT_DIR / "material_summary_2022.csv", index=False)
+    # 去重逻辑：以 reference_code 为主（你们 later join 最常用它）
+    before = len(df)
+    df = df[df["reference_code"] != ""].copy()
+    df = df.drop_duplicates(subset=["reference_code"], keep="first")
+    print(f"[QA] drop empty + dedup by reference_code: {before} -> {len(df)}")
 
-    size_summary = df.groupby("size_label").size().reset_index(name="n")
-    size_summary["share"] = size_summary["n"] / size_summary["n"].sum()
-    size_summary = size_summary.sort_values("n", ascending=False)
-    size_summary.to_csv(OUT_DIR / "size_summary_2022.csv", index=False)
+    # 最终输出列（这一版是“ seeable & stable ”的 baseline 2026）
+    out = df[
+        [
+            "year",
+            "reference_code",
+            "local_reference",
+            "objectID",
+            "title",
+            "collection",
+            "currency",
+            "price",
+            "price_eur",
+            "url",
+            "url_full",
+        ]
+    ].copy()
 
-    # Print quick checks
-    print("✅ Done.")
-    print(f"Input:  {input_path}")
-    print(f"Output: {output_path}")
-    print(f"Text column used: {text_col}")
-    print("\nMaterial distribution:")
-    print(mat_summary.to_string(index=False))
-    print("\nSize distribution:")
-    print(size_summary.to_string(index=False))
-    print(f"\nSaved summaries to:\n- {OUT_DIR / 'material_summary_2022.csv'}\n- {OUT_DIR / 'size_summary_2022.csv'}")
+    # 质量检查
+    print("[QA] rows:", len(out))
+    print("[QA] missing price_eur ratio:", out["price_eur"].isna().mean())
+    print("[QA] unique reference_code:", out["reference_code"].nunique())
+
+    return out
+
+
+def main():
+    df_2026_fe = build_baseline_2026_fe(RAW_2026_PATH)
+
+    # 输出：永远写一个带时间戳的新文件，避免 PermissionError
+    out_path = safe_write_csv(df_2026_fe, OUT_DIR, base_name="baseline_2026_fe")
+    print(f"[OK] Saved -> {out_path} | rows={len(df_2026_fe)} cols={len(df_2026_fe.columns)}")
+
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Cartier catalogue feature engineering (material & size labels).")
-    parser.add_argument("--input", type=str, default=str(DEFAULT_INPUT), help="Path to input baseline CSV (default: data/raw/baseline_2022_fe.csv)")
-    parser.add_argument("--output", type=str, default=str(DEFAULT_OUTPUT), help="Path to output labeled CSV (default: data/processed/baseline_2022_labeled.csv)")
-    args = parser.parse_args()
-
-    main(Path(args.input), Path(args.output))
+    main()
