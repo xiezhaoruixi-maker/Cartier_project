@@ -27,35 +27,7 @@ The project integrates multiple data sources:
 ---
 
 ## Project Structure
-# Cartier Watch Product Structure Analysis (2022–2026)
 
-## Project Overview
-This project analyzes Cartier watch product structure and pricing evolution between 2022 and 2026 by combining historical monitoring data with current product information from the official Cartier website.
-
-Initially, the project aimed to analyze gold watch prices. However, during data exploration, we found that gold models were too few to be statistically meaningful. Therefore, the analysis focus shifted to **collection-level product structure analysis**, which provides a more stable and representative view of Cartier’s product portfolio.
-
-The project follows a complete data analytics workflow:
-- Data collection
-- Data cleaning and standardization
-- Feature engineering
-- Dataset aggregation
-- Visualization and business insight generation
-- Reproducible pipeline setup (Docker)
-
----
-
-## Data Sources
-The project integrates multiple data sources:
-
-- Historical monitoring dataset (BigQuery)
-- Cartier official website product data (scraping)
-- ECB exchange rate data
-- Cartier collection launch year data (Wikipedia)
-- Processed analytical datasets
-
----
-
-## Project Structure
 Cartier_project/
 │
 ├── src/
