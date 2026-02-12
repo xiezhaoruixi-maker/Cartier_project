@@ -49,20 +49,6 @@ Cartier_project/
 
 ## Team Contributions
 
-### A — Data Preparation & Pipeline
-Responsible for preparing the analytical dataset used across the project.
-
-Main contributions:
-- Cleaned and standardized the BigQuery historical monitoring dataset
-- Processed key fields including price, currency, collection, and size
-- Generated baseline datasets for analysis
-- Built a web scraping script to collect current Cartier watch product data
-- Aligned historical and current datasets using feature engineering
-- Generated collection-level summary dataset (`collection_summary.csv`)
-- Organized the GitHub repository structure
-- Containerized the pipeline using Docker for reproducibility
-
-Pipeline:
 
 ---
 
