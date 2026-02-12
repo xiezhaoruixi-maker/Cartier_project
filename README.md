@@ -21,7 +21,6 @@ The project integrates multiple data sources:
 - Historical monitoring dataset (BigQuery)
 - Cartier official website product data (scraping)
 - ECB exchange rate data
-- Cartier collection launch year data (Wikipedia)
 - Processed analytical datasets
 
 ---
